@@ -1,11 +1,14 @@
 import { db } from "../database/db";
 import type { CreateProductDTO } from "../../src/dto/CreateProductDTO";
 import type { Product } from "../../src/model/Product";
+import { buildProductQuery } from "./productQuery";
 
 export interface ProductFilters {
   search?: string;
   category?: string;
   sort?: string;
+  limit?: number;
+  offset?: number;
 }
 
 function mapProduct(row: Record<string, unknown>): Product {
@@ -21,35 +24,15 @@ function mapProduct(row: Record<string, unknown>): Product {
 
 export class ProductRepository {
   async findAll(filters: ProductFilters): Promise<Product[]> {
-    const conditions: string[] = [];
-    const values: unknown[] = [];
+    const { sql, values } = buildProductQuery({
+      search: filters.search,
+      category: filters.category,
+      sort: filters.sort,
+      limit: filters.limit,
+      offset: filters.offset
+    });
 
-    if (filters.search) {
-      values.push(`%${filters.search}%`);
-      const parameter = `$${values.length}`;
-      conditions.push(`(name ILIKE ${parameter} OR description ILIKE ${parameter})`);
-    }
-
-    if (filters.category) {
-      values.push(filters.category);
-      conditions.push(`name = $${values.length}`);
-    }
-
-    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
-    const orderBy = filters.sort === "price" ? "price ASC" : "name ASC";
-    const sql = `SELECT id, name, description, category, price, stock FROM products ${where} ORDER BY ${orderBy}`;
-
-    const firstStartedAt = performance.now();
-    const discardedResult = await db.query(sql, values);
-    console.info(
-      `[SQL LENTO] listagem descartada: ${discardedResult.rowCount ?? 0} linhas em ${(performance.now() - firstStartedAt).toFixed(2)} ms`
-    );
-
-    const secondStartedAt = performance.now();
     const result = await db.query(sql, values);
-    console.info(
-      `[SQL LENTO] listagem retornada: ${result.rowCount ?? 0} linhas em ${(performance.now() - secondStartedAt).toFixed(2)} ms`
-    );
     return result.rows.map(mapProduct);
   }
 
@@ -68,18 +51,21 @@ export class ProductRepository {
   }
 
   async getDashboard() {
-    const dashboardStartedAt = performance.now();
-    const total = await db.query("SELECT COUNT(*) AS value FROM products");
-    const lowStock = await db.query("SELECT COUNT(*) AS value FROM products WHERE stock <= 5");
-    const inventory = await db.query("SELECT COALESCE(SUM(price * stock), 0) AS value FROM products");
-    const categories = await db.query("SELECT COUNT(DISTINCT category) AS value FROM products");
-    console.info(`[SQL LENTO] dashboard: 4 consultas sequenciais em ${(performance.now() - dashboardStartedAt).toFixed(2)} ms`);
+    const result = await db.query(`
+      SELECT
+        COUNT(*) AS total_products,
+        SUM(CASE WHEN stock <= 5 THEN 1 ELSE 0 END) AS low_stock,
+        COALESCE(SUM(price * stock), 0) AS inventory_value,
+        COUNT(DISTINCT category) AS categories
+      FROM products
+    `);
 
+    const row = result.rows[0];
     return {
-      totalProducts: Number(total.rows[0].value),
-      lowStock: Number(lowStock.rows[0].value),
-      inventoryValue: Number(inventory.rows[0].value),
-      categories: Number(categories.rows[0].value)
+      totalProducts: Number(row.total_products),
+      lowStock: Number(row.low_stock),
+      inventoryValue: Number(row.inventory_value),
+      categories: Number(row.categories)
     };
   }
 }

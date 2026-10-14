@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { AuthGate } from "@/components/AuthGate";
 import { MetricCard } from "@/components/MetricCard";
 import { apiRequest } from "@/fetch/api";
 
@@ -11,7 +12,7 @@ interface DashboardDTO {
   categories: number;
 }
 
-export function DashboardPage() {
+function DashboardContent() {
   const [data, setData] = useState<DashboardDTO | null>(null);
   const [error, setError] = useState("");
 
@@ -40,3 +41,13 @@ export function DashboardPage() {
     </section>
   );
 }
+
+export function DashboardPage() {
+  return (
+    <AuthGate>
+      <DashboardContent />
+    </AuthGate>
+  );
+}
+
+export default DashboardPage;

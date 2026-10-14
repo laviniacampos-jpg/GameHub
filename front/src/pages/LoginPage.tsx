@@ -1,11 +1,12 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { login } from "@/fetch/authRequests";
+import { useAuth } from "@/context/AuthContext";
 
 export function LoginPage() {
-  const router = useRouter();
+  const { setSession } = useAuth();
   const [email, setEmail] = useState("aluno@gamehub.local");
   const [password, setPassword] = useState("123456");
   const [error, setError] = useState("");
@@ -18,8 +19,8 @@ export function LoginPage() {
 
     try {
       const result = await login({ email, password });
-      window.localStorage.setItem("gamehub-token", result.token);
-      router.push("/dashboard");
+      setSession(result);
+      window.location.assign("/dashboard");
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Falha no login.");
     } finally {
@@ -39,7 +40,10 @@ export function LoginPage() {
         <button className="button button--full" disabled={loading}>
           {loading ? "Entrando..." : "Entrar"}
         </button>
+        <p className="auth-switch">Ainda não tem uma conta? <Link href="/register">Cadastre-se</Link></p>
       </form>
     </section>
   );
 }
+
+export default LoginPage;

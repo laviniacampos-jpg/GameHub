@@ -3,7 +3,7 @@ import jwt from "jsonwebtoken";
 import { environment } from "../config/environment";
 
 export interface AuthenticatedRequest extends Request {
-  user?: { id: number; role: string };
+  user?: { id: number; email: string; role: "admin" | "student" };
 }
 
 export function authMiddleware(
@@ -22,11 +22,17 @@ export function authMiddleware(
   }
 
   try {
-    const payload = jwt.verify(token, environment.jwtSecret) as {
-      id: number;
-      role: string;
-    };
-    request.user = payload;
+    const payload = jwt.verify(token, environment.jwtSecret);
+    if (
+      typeof payload === "string" ||
+      typeof payload.id !== "number" ||
+      typeof payload.email !== "string" ||
+      (payload.role !== "admin" && payload.role !== "student")
+    ) {
+      response.status(401).json({ message: "Token inválido ou expirado." });
+      return;
+    }
+    request.user = { id: payload.id, email: payload.email, role: payload.role };
     next();
   } catch {
     response.status(401).json({ message: "Token inválido ou expirado." });

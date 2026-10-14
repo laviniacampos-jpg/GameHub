@@ -83,7 +83,10 @@ async function initialize() {
   await db.query(
     `INSERT INTO users (name, email, password_hash, role)
      VALUES ($1, $2, $3, $4), ($5, $6, $7, $8)
-     ON CONFLICT (email) DO NOTHING`,
+     ON CONFLICT (email) DO UPDATE
+       SET name = EXCLUDED.name,
+           password_hash = EXCLUDED.password_hash,
+           role = EXCLUDED.role`,
     [
       "Administrador GameHub", "admin@gamehub.local", passwordHash, "admin",
       "Aluno GameHub", "aluno@gamehub.local", passwordHash, "student"

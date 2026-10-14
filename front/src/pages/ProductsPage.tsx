@@ -4,33 +4,86 @@ import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { ProductCard } from "@/components/ProductCard";
 import { ErrorState } from "@/components/ErrorState";
-import { LoadingState } from "@/components/LoadingState";
 import type { ProductDTO } from "@/dto/ProductDTO";
 import { createProduct, deleteProduct, getProducts } from "@/fetch/productRequests";
-import { measurePerformance } from "@/utils/measurePerformance";
+import { sortProducts } from "@/utils/productSort";
+import { useAuth } from "@/context/AuthContext";
+
+const PAGE_SIZE = 80;
+
+function ProductSkeletonList() {
+  return (
+    <div className="product-grid" aria-live="polite" aria-busy="true">
+      {Array.from({ length: 6 }, (_, index) => (
+        <article key={index} className="product-card" style={{ opacity: 0.7 }}>
+          <div className="product-card__top">
+            <span className="category-pill" style={{ background: "#2a2a2a", color: "transparent" }}>loading</span>
+            <span className="stock" style={{ background: "#2a2a2a", color: "transparent" }}>loading</span>
+          </div>
+          <h2 style={{ background: "#2a2a2a", color: "transparent" }}>loading</h2>
+          <p style={{ background: "#2a2a2a", color: "transparent" }}>loading</p>
+          <div className="product-card__bottom">
+            <strong style={{ background: "#2a2a2a", color: "transparent" }}>loading</strong>
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
 
 export function ProductsPage() {
   const [products, setProducts] = useState<ProductDTO[]>([]);
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
   const [sort, setSort] = useState("name");
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
-  const [isAdmin, setIsAdmin] = useState(false);
   const [createMessage, setCreateMessage] = useState("");
   const [creating, setCreating] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
+
+  const loadProducts = useCallback(async (nextOffset = 0, append = false) => {
+    if (append) {
+      setLoadingMore(true);
+    } else {
+      setLoading(true);
+    }
+    setError("");
+
+    try {
+      const result = await getProducts({
+        search,
+        category,
+        sort,
+        limit: PAGE_SIZE,
+        offset: nextOffset
+      });
+
+      setProducts((currentProducts) => append ? [...currentProducts, ...result] : result);
+      setHasMore(result.length === PAGE_SIZE);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Erro inesperado.");
+    } finally {
+      setLoading(false);
+      setLoadingMore(false);
+    }
+  }, [search, category, sort]);
 
   useEffect(() => {
-    const token = window.localStorage.getItem("gamehub-token");
-    if (!token) return;
-    try {
-      const encoded = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
-      const payload = JSON.parse(window.atob(encoded));
-      setIsAdmin(payload.role === "admin");
-    } catch {
-      setIsAdmin(false);
-    }
-  }, []);
+    const timer = window.setTimeout(() => {
+      setSearch(searchInput.trim());
+    }, 350);
+
+    return () => window.clearTimeout(timer);
+  }, [searchInput]);
+
+  useEffect(() => {
+    void loadProducts(0, false);
+  }, [loadProducts]);
 
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -39,17 +92,20 @@ export function ProductsPage() {
     setCreating(true);
     setCreateMessage("");
     setError("");
+
     try {
-      await createProduct({
+      const createdProduct = await createProduct({
         name: String(data.get("name") ?? "").trim(),
         description: String(data.get("description") ?? "").trim(),
         category: String(data.get("category") ?? "Jogos") as ProductDTO["category"],
         price: Number(data.get("price")),
         stock: Number(data.get("stock"))
       });
+
+      setProducts((currentProducts) => [createdProduct, ...currentProducts].slice(0, PAGE_SIZE));
       setCreateMessage("Produto cadastrado. Catálogo atualizado.");
       form.reset();
-      await loadProducts();
+      setHasMore(true);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Não foi possível cadastrar o produto.");
     } finally {
@@ -57,48 +113,22 @@ export function ProductsPage() {
     }
   }
 
-
-  const loadProducts = useCallback(async () => {
-    setLoading(true);
-    setError("");
-
-    try {
-      const result = await measurePerformance(
-        "carregamento de produtos",
-        () => getProducts({ search, category, sort })
-      );
-      setProducts(result);
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Erro inesperado.");
-    } finally {
-      setLoading(false);
-    }
-  }, [search, category, sort]);
-
-  useEffect(() => {
-    void loadProducts();
-  }, [loadProducts]);
-
   async function handleDelete(id: number) {
     if (!window.confirm("Deseja excluir este produto?")) return;
 
     try {
       await deleteProduct(id);
-      await loadProducts();
+      setProducts((currentProducts) => currentProducts.filter((product) => product.id !== id));
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Não foi possível excluir.");
     }
   }
 
-  const visibleProducts = products
-    .filter((product) => {
-      const term = search.toLowerCase();
-      return (product.name.toLowerCase().includes(term) || product.description.toLowerCase().includes(term))
-        && (!category || product.category === category);
-    })
-    .sort((a, b) => sort === "price"
-      ? String(a.price).localeCompare(String(b.price))
-      : a.name.localeCompare(b.name));
+  async function handleLoadMore() {
+    await loadProducts(products.length, true);
+  }
+
+  const visibleProducts = sortProducts(products, sort);
 
   return (
     <section>
@@ -108,7 +138,7 @@ export function ProductsPage() {
           <h1>Produtos</h1>
           <p>Pesquise e consulte o estoque da loja.</p>
         </div>
-        <span className="result-count">{visibleProducts.length} produtos • catálogo completo</span>
+        <span className="result-count">{visibleProducts.length} produtos • carregados</span>
       </div>
 
       {isAdmin && (
@@ -129,7 +159,7 @@ export function ProductsPage() {
       <div className="filters">
         <label>
           Buscar
-          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Nome do produto..." />
+          <input value={searchInput} onChange={(event) => setSearchInput(event.target.value)} placeholder="Nome do produto..." />
         </label>
         <label>
           Categoria
@@ -149,14 +179,38 @@ export function ProductsPage() {
         </label>
       </div>
 
-      {loading ? <LoadingState /> : error ? <ErrorState message={error} onRetry={loadProducts} /> : (
-        <div className="product-grid">
-          {visibleProducts.map((product) => (
-            <ProductCard key={product.id} product={product} onDelete={handleDelete} />
-          ))}
-          {visibleProducts.length === 0 && <p>Nenhum produto encontrado.</p>}
-        </div>
+      {loading ? <ProductSkeletonList /> : error ? <ErrorState message={error} onRetry={() => loadProducts(0, false)} /> : (
+        <>
+          <div className="product-grid">
+            {visibleProducts.map((product) => (
+              <ProductCard key={product.id} product={product} onDelete={handleDelete} />
+            ))}
+            {visibleProducts.length === 0 && (
+              <div>
+                <p>Nenhum produto encontrado.</p>
+                <button className="button button--secondary" onClick={() => {
+                  setSearchInput("");
+                  setSearch("");
+                  setCategory("");
+                  setSort("name");
+                }}>
+                  Limpar filtros
+                </button>
+              </div>
+            )}
+          </div>
+
+          {hasMore && visibleProducts.length > 0 && (
+            <div className="load-more-wrapper">
+              <button className="button button--secondary" onClick={handleLoadMore} disabled={loadingMore}>
+                {loadingMore ? "Carregando..." : "Carregar mais"}
+              </button>
+            </div>
+          )}
+        </>
       )}
     </section>
   );
 }
+
+export default ProductsPage;

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { AppHeader } from "@/components/AppHeader";
+import { AuthProvider } from "@/context/AuthContext";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -12,8 +13,10 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="pt-BR">
       <body>
         <div className="app-shell">
-          <AppHeader />
-          <main>{children}</main>
+          <AuthProvider>
+            <AppHeader />
+            <main>{children}</main>
+          </AuthProvider>
         </div>
       </body>
     </html>
